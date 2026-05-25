@@ -7,7 +7,7 @@ import time
 # ── Process / memory auto-discovery ──────────────────────────────────────────
 PROCESS_NAME   = "dosbox"         # case-insensitive cmdline substring
 WIND_SPEED_OFF = 0x27363          # confirmed offset of wind-speed ASCII string
-DEFAULT_BASE   = 0x7025ccbff010   # last-known-good base; verified/re-discovered at startup
+DEFAULT_BASE   = 0x7ac6c6fff010   # last-known-good base; verified/re-discovered at startup
 
 
 def find_pid(name: str):
