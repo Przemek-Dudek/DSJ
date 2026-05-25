@@ -14,8 +14,10 @@ DOSBOX_GAME_DIR  = "/home/pdudek/Games/DOS/DSJ21p"
 DOSBOX_MAIN_CONF = "/home/pdudek/Games/DOS/DSJ21p/dosbox.conf"
 DOSBOX_TRAIN_CONF= "/home/pdudek/Documents/DSJ_AI/training_override.conf"
 
-# How long to wait for DSJ2 to finish loading after DOSBox is spawned (seconds)
-DOSBOX_LOAD_TIMEOUT_S = 30
+# How long to wait for DSJ2 to finish loading after DOSBox is spawned (seconds).
+# This includes time for the user to navigate the in-game menu to the hill.
+# The wind string is only present once a hill screen is loaded, so give plenty of time.
+DOSBOX_LOAD_TIMEOUT_S = 15
 
 # ── Action IDs ────────────────────────────────────────────────────────────────
 ACT_NOTHING    = 0
@@ -55,7 +57,7 @@ LANDING_PHASE_MAX_STEPS = 10
 
 # ── Timing ────────────────────────────────────────────────────────────────────
 STEP_DURATION_S         = 0.05    # 20 Hz; each env.step() call targets this wall-clock length
-RESULTS_WAIT_S          = 1.5     # seconds after touchdown before results are written to RAM
+RESULTS_WAIT_S          = 4.0     # seconds after touchdown before results are written to RAM
 CLICK_DURATION_S        = 0.05    # how long the mouse button is held per click
 WINDOW_FOCUS_SLEEP_S    = 0.15    # pause after wmctrl focus call to let X11 settle
 

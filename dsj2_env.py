@@ -130,23 +130,46 @@ class DSJ2Env(gym.Env):
 
     def _wait_for_game(self, pid: int) -> int:
         """
-        Poll until DSJ2's physics struct is detectable in RAM (wind string present).
+        Poll until DSJ2's wind string is present in RAM, confirming the correct
+        DOS RAM base address.  The wind string only appears once the game has
+        loaded a hill, so this doubles as the "navigate to hill" gate.
+
+        Prints navigation instructions on the first iteration so the user knows
+        to switch to the DOSBox window and select a hill while we wait.
+
         Returns the confirmed base address.
         Raises RuntimeError if the game does not load within DOSBOX_LOAD_TIMEOUT_S.
         """
         deadline = time.time() + config.DOSBOX_LOAD_TIMEOUT_S
+        first = True
         while time.time() < deadline:
             base, ws = find_base_auto(pid)
             if base is not None and ws is not None and "readable" not in str(ws):
+                if self.verbose:
+                    print(f"\n[DSJ2Env] Game detected — wind string confirmed: \"{ws}\"")
                 return base
+
+            if first and self.verbose:
+                print()
+                print("=" * 60)
+                print("  DOSBox is open. In the game window:")
+                print("    1. Select your country / jumper")
+                print("    2. Select a hill")
+                print("    3. Stand at the top of the ramp")
+                print(f"  Waiting up to {config.DOSBOX_LOAD_TIMEOUT_S}s for wind")
+                print("  string to appear (confirms correct hill is loaded)...")
+                print("=" * 60)
+                first = False
+
             time.sleep(0.5)
 
         # Last-ditch: accept a merely-readable base so we at least connect
         base, ws = find_base_auto(pid)
         if base is not None:
             if self.verbose:
-                print("[DSJ2Env] WARNING: game load timed out; "
-                      "wind string not confirmed. Navigate to the hill manually.")
+                print("\n[DSJ2Env] WARNING: wind string not confirmed after "
+                      f"{config.DOSBOX_LOAD_TIMEOUT_S}s. "
+                      "Telemetry may read garbage until you navigate to a hill.")
             return base
 
         raise RuntimeError(
@@ -232,18 +255,27 @@ class DSJ2Env(gym.Env):
         elif self.phase == config.PHASE_IN_FLIGHT:
             self.flight_frames += 1
             y_vel_delta = y_vel - self.prev_y_vel
-            # Grace period prevents the jump kick from being misidentified as landing
-            if (self.flight_frames > config.LANDING_GRACE_FRAMES
-                    and abs(y_vel_delta) > config.LANDING_Y_VEL_DELTA):
-                self.phase = config.PHASE_LANDING
-                self.landing_step_count = 0
-                self.landing_start_time = time.time()
-                # Re-centre mouse: no pitch control after landing
-                self.controller.reset_position()
-                self._log(
-                    f"  Phase → LANDING    (frame {self.flight_frames}, "
-                    f"Δy_vel={y_vel_delta:.2f})"
-                )
+
+            if self.flight_frames > config.LANDING_GRACE_FRAMES:
+                # Primary trigger: sharp y-velocity change on snow impact
+                y_vel_triggered = abs(y_vel_delta) > config.LANDING_Y_VEL_DELTA
+                # Fallback trigger: physics loop went idle (speed left valid range)
+                # Catches smooth landings and cases where the skier stops without
+                # a sharp y_vel spike (e.g. fall, very flat hill, or results screen
+                # cleared the struct before the next poll).
+                phys_went_idle  = not self.telemetry.is_jump_active()
+
+                if y_vel_triggered or phys_went_idle:
+                    trigger = "y_vel" if y_vel_triggered else "physics_idle"
+                    self.phase = config.PHASE_LANDING
+                    self.landing_step_count = 0
+                    self.landing_start_time = time.time()
+                    # Re-centre mouse: no pitch control after landing
+                    self.controller.reset_position()
+                    self._log(
+                        f"  Phase → LANDING    (frame {self.flight_frames}, "
+                        f"trigger={trigger}, Δy_vel={y_vel_delta:.2f})"
+                    )
 
         # PHASE_LANDING is terminal — handled in step()
 
@@ -339,10 +371,6 @@ class DSJ2Env(gym.Env):
     ) -> Tuple[np.ndarray, dict]:
         super().reset(seed=seed)
 
-        # Send the two post-jump LMB clicks to return to the ramp.
-        # This is a no-op on the very first episode (game is already at the ramp).
-        self.controller.send_reset_clicks()
-
         # Reset all episode-level bookkeeping
         self.phase = config.PHASE_WAITING
         self.step_count = 0
@@ -352,6 +380,14 @@ class DSJ2Env(gym.Env):
         self.rising_streak = 0
         self._prev_phase = config.PHASE_WAITING
         self._obs_clip_count = 0
+
+        # Wait for the user to navigate to the ramp and confirm readiness.
+        # This is the main gate between episodes: the agent takes no actions
+        # until Enter is pressed, so the game can always be in the right state.
+        print(f"\n  [Episode {self.step_count // 1 + 1}] "
+              "Navigate to the ramp, then press Enter to start... ",
+              end="", flush=True)
+        input()
 
         # Focus the window once for the whole episode
         self.controller.focus_window()
@@ -374,7 +410,7 @@ class DSJ2Env(gym.Env):
         self.prev_y_vel = state["y_vel"]
 
         self._log(
-            f"  Episode reset complete. "
+            f"  Episode start: "
             f"wind={state['wind_speed']:.2f} m/s @ {state['wind_dir']:.0f}°"
         )
 

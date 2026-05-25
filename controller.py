@@ -127,19 +127,27 @@ class DSJ2Controller:
 
     def mouse_up(self, delta: Optional[int] = None) -> None:
         """
-        Move the mouse upward by `delta` pixels (relative movement).
-        Used for pitch-up (lean back) control during flight.
+        Move the mouse upward by `delta` pixels for pitch-up (lean back) control.
+        Uses absolute positioning clamped to the window so the cursor can never
+        drift outside DOSBox regardless of how many consecutive moves are made.
+        X is always held at window centre to prevent horizontal drift.
         """
         delta = delta if delta is not None else config.MOUSE_DELTA_PX
-        self.mouse.move(0, -delta)
+        cx, _cy       = self.window_center
+        _curr_x, curr_y = self.mouse.position
+        new_y = max(self._win_y, curr_y - delta)
+        self.mouse.position = (cx, new_y)
 
     def mouse_down(self, delta: Optional[int] = None) -> None:
         """
-        Move the mouse downward by `delta` pixels (relative movement).
-        Used for pitch-down (lean forward) control during flight.
+        Move the mouse downward by `delta` pixels for pitch-down (lean forward).
+        Clamped to window bottom; X held at window centre.
         """
         delta = delta if delta is not None else config.MOUSE_DELTA_PX
-        self.mouse.move(0, delta)
+        cx, _cy       = self.window_center
+        _curr_x, curr_y = self.mouse.position
+        new_y = min(self._win_y + self._win_h, curr_y + delta)
+        self.mouse.position = (cx, new_y)
 
     # ── Reset helpers ─────────────────────────────────────────────────────────
 

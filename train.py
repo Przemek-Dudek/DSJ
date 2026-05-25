@@ -115,23 +115,14 @@ def main() -> None:
     args = parse_args()
 
     # ── Environment (spawns DOSBox as child process) ──────────────────────────
+    # Navigation instructions are printed inside DSJ2Env._wait_for_game(),
+    # which blocks until the wind string is confirmed (hill is loaded).
     print("Initialising DSJ2 environment...")
     print("  DOSBox will be launched automatically.")
     print("  Any existing DOSBox process will be terminated first.\n")
     env = Monitor(DSJ2Env(verbose=(args.verbose > 0)))
 
-    # Give the user time to navigate the DSJ2 menu to the ramp
-    print()
-    print("=" * 60)
-    print("  DOSBox is running.  In the game window:")
-    print("    1. Select your country / jumper")
-    print("    2. Select a hill")
-    print("    3. Wait until the jumper is standing at the top of the ramp")
-    print("  Then come back here and press Enter to start training.")
-    print("=" * 60)
-    input("\n  Press Enter when the jumper is ready at the ramp... ")
-    print()
-
+    # The per-episode Enter gate is handled inside DSJ2Env.reset().
     # ── Directories ───────────────────────────────────────────────────────────
     os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
     os.makedirs(config.LOG_DIR,        exist_ok=True)
@@ -208,7 +199,6 @@ def main() -> None:
             callback=callbacks,
             reset_num_timesteps=not args.resume,
             tb_log_name="dsj2_ppo",
-            progress_bar=True,
         )
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")
