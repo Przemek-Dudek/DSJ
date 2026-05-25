@@ -1,6 +1,95 @@
+import os
+import sys
 import struct
 import re
 import time
+
+# ── Process / memory auto-discovery ──────────────────────────────────────────
+PROCESS_NAME   = "dosbox"         # case-insensitive cmdline substring
+WIND_SPEED_OFF = 0x27363          # confirmed offset of wind-speed ASCII string
+DEFAULT_BASE   = 0x7025ccbff010   # last-known-good base; verified/re-discovered at startup
+
+
+def find_pid(name: str):
+    """Return PID of the first process whose cmdline contains name (case-insensitive)."""
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f'/proc/{entry}/cmdline', 'rb') as f:
+                cmd = f.read().replace(b'\x00', b' ').decode(errors='ignore')
+            if name.lower() in cmd.lower():
+                return int(entry)
+        except OSError:
+            pass
+    return None
+
+
+def verify_base(pid: int, base: int):
+    """
+    Confirm base is the correct DOS RAM start.
+
+    Returns the wind-speed string if the ASCII string at BASE+WIND_SPEED_OFF
+    looks valid (digits and dots), a fallback message if the address is merely
+    readable, or None if the address is unreadable.
+    """
+    try:
+        with open(f'/proc/{pid}/mem', 'rb') as f:
+            f.seek(base + WIND_SPEED_OFF)
+            raw = f.read(16)
+    except OSError:
+        return None
+
+    stripped = raw.split(b'\x00')[0]
+    s = stripped.decode('ascii', errors='ignore').strip()
+    if len(s) >= 3 and all(c in '0123456789.' for c in s):
+        return s                                       # confirmed: wind string present
+
+    return "(readable – navigate to hill to confirm)"
+
+
+def find_base_auto(pid: int):
+    """
+    Scan /proc/<pid>/maps for rw-p anonymous regions >= 8 MB (DOS RAM is 16 MB).
+    Probe each candidate; prefer the one with a valid wind string, fall back to
+    any readable one.
+    Returns (base_addr, status_string) or (None, None).
+    """
+    candidates = []
+    try:
+        with open(f'/proc/{pid}/maps') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 2 or 'rw' not in parts[1]:
+                    continue
+                try:
+                    s, e = parts[0].split('-')
+                    start, size = int(s, 16), int(e, 16) - int(s, 16)
+                    if size >= 8 * 1024 * 1024:
+                        candidates.append((start, size))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+
+    candidates.sort(key=lambda x: -x[1])   # largest region first
+
+    best_fallback = None
+    for base, _ in candidates:
+        ws = verify_base(pid, base)
+        if ws is None:
+            continue
+        if 'readable' not in ws:            # strong match: wind string present
+            return base, ws
+        if best_fallback is None:
+            best_fallback = (base, ws)
+
+    if best_fallback:
+        return best_fallback
+    return None, None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 class DSJ2MemoryDirect:
     def __init__(self, pid, base_addr):
@@ -102,13 +191,29 @@ class DSJ2MemoryDirect:
         return state
 
 if __name__ == "__main__":
-    # --- CURRENT ACTIVE SESSION CONFIG ---
-    PID = 11670                   
-    BASE = 0x7025ccbff010         
-    # -------------------------------------
-    
-    game = DSJ2MemoryDirect(PID, BASE)
-    
+    print(f"  Searching for '{PROCESS_NAME}' process...", end=' ', flush=True)
+    pid = find_pid(PROCESS_NAME)
+    if pid is None:
+        print("NOT FOUND.\n  Start DOSBox with DSJ2 loaded, then re-run.")
+        sys.exit(1)
+    print(f"PID = {pid}")
+
+    print(f"  Verifying BASE_ADDR = 0x{DEFAULT_BASE:016x}...", end=' ', flush=True)
+    ws = verify_base(pid, DEFAULT_BASE)
+    if ws:
+        base = DEFAULT_BASE
+        print(f"OK  (wind: \"{ws}\")")
+    else:
+        print("failed.")
+        print("  Scanning /proc/maps for correct base address...")
+        base, ws = find_base_auto(pid)
+        if base is None:
+            print("  [error] Cannot locate DOS RAM base.")
+            print("  Make sure DSJ2 is loaded and at the pre-jump screen.")
+            sys.exit(1)
+        print(f"  Discovered BASE = 0x{base:016x}  (wind: \"{ws}\")")
+
+    game = DSJ2MemoryDirect(pid, base)
     print("Direct Kernel Telemetry Connected.")
     print("Monitoring DOSBox emulated system RAM...")
     
