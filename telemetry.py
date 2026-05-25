@@ -9,7 +9,8 @@ class DSJ2MemoryDirect:
         self.mem_path = f"/proc/{self.pid}/mem"
         
         # Fixed static offsets discovered from your data verification
-        self.WIND_STRING_ADDR = self.base_addr + 0x27363
+        self.WIND_STRING_ADDR   = self.base_addr + 0x27363
+        # 0x27310 is a hill geometry constant (~13.125°, possibly table angle) — not wind dir
         self.PLAYER_STRUCT_ADDR = self.base_addr + 0x29bd0
 
     def is_jump_active(self):
@@ -31,7 +32,7 @@ class DSJ2MemoryDirect:
         state = {
             "x_vel": 0.0, "y_vel": 0.0, "speed": 0.0,
             "y_pos": 0.0, "x_pos": 0.0, "tilt": 0.0,
-            "wind_speed": 0.0, "wind_dir": 0.0
+            "wind_speed": 0.0, "wind_dir": 0.0   # wind_dir: address TBD (run wind_dir_scanner.py)
         }
         
         try:
@@ -47,19 +48,19 @@ class DSJ2MemoryDirect:
                 state["x_pos"] = struct.unpack('<f', player_block[100:104])[0]
                 state["tilt"]  = struct.unpack('<f', player_block[124:128])[0]
                 
-                # 2. Read and clean the wind text string
+                # 2. Wind speed — first number from the ASCII string only.
+                #    The string format is "X.X.Y.Y" where X.X is speed and
+                #    ".Y.Y" is a constant suffix unrelated to direction.
                 f.seek(self.WIND_STRING_ADDR)
-                # Read 12 bytes to ensure we capture the secondary direction number
                 wind_bytes = f.read(12).split(b'\x00')[0]
                 wind_str = wind_bytes.decode('ascii', errors='ignore')
-                
-                # Extract ALL distinct numbers from the string (e.g. "2.85" and "0.0")
                 numbers = re.findall(r"[-+]?\d*\.\d+|\d+", wind_str)
-                if len(numbers) >= 1:
+                if numbers:
                     state["wind_speed"] = float(numbers[0])
-                if len(numbers) >= 2:
-                    state["wind_dir"] = float(numbers[1])
-                    
+
+                # Wind direction address not yet confirmed — run wind_dir_scanner.py
+                # to find it.  wind_dir stays 0.0 until then.
+
         except Exception:
             pass # Catch mid-frame screen transition resets gracefully
             
@@ -128,8 +129,7 @@ if __name__ == "__main__":
                 print(
                     f"  [{flight_status}] DIST: {state['x_pos']:8.2f} | "
                     f"Y-VEL: {current_y_vel:6.2f} | Y-POS: {current_y_pos:8.2f} | "
-                    f"TILT: {state['tilt']:5.2f} | WIND: {state['wind_speed']:.2f} m/s | "
-                    f"DIR: {state['wind_dir']:.2f}",
+                    f"TILT: {state['tilt']:5.2f} | WIND: {state['wind_speed']:.2f} m/s",
                     end="\r"
                 )
 
