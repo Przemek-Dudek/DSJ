@@ -15,6 +15,37 @@ class DSJ2MemoryDirect:
         self.WIND_DIR_ADDR      = self.base_addr + 0x29674
         self.PLAYER_STRUCT_ADDR = self.base_addr + 0x29bd0
 
+        # Final jump distance result (float32, written to RAM at landing)
+        # Source: 4-run scanner — present as CHANGED AT LANDING in runs 1, 2, 4; first hit in run 3
+        self.DISTANCE_RESULT_ADDR = self.base_addr + 0x29be2
+
+        # Five judge score slots (float32 each, uniform stride 0x109 = 265 bytes)
+        # Source: 4-run scanner — cross-validated against manually entered scores all 4 runs
+        self.JUDGE_SCORE_ADDRS = [
+            self.base_addr + 0x2969d,  # Judge 1
+            self.base_addr + 0x297a6,  # Judge 2
+            self.base_addr + 0x298af,  # Judge 3
+            self.base_addr + 0x299b8,  # Judge 4
+            self.base_addr + 0x29ac1,  # Judge 5
+        ]
+
+    def get_results(self):
+        """Reads the final jump distance and all 5 judge scores after landing.
+        Call ~1.5 s after touchdown to give the game time to write results.
+        Returns (distance_m: float, scores: list[float])."""
+        distance = 0.0
+        scores = [0.0] * 5
+        try:
+            with open(self.mem_path, 'rb') as f:
+                f.seek(self.DISTANCE_RESULT_ADDR)
+                distance = struct.unpack('<f', f.read(4))[0]
+                for i, addr in enumerate(self.JUDGE_SCORE_ADDRS):
+                    f.seek(addr)
+                    scores[i] = struct.unpack('<f', f.read(4))[0]
+        except Exception:
+            pass
+        return distance, scores
+
     def is_jump_active(self):
         """Checks if the game has currently loaded active physics data into the struct"""
         try:
@@ -120,9 +151,16 @@ if __name__ == "__main__":
                     # kick transient cannot re-trigger as a false landing.
                     # After that, a sudden y_vel change indicates snow impact.
                     if flight_frames > 20 and abs(y_delta) > 2.0:
-                        final_score = state['x_pos']
                         print(f"\n[!!!] TOUCHDOWN at frame {flight_frames}. Impact captured.")
-                        print(f"Final Raw Engine Score (Distance): {final_score:.2f}")
+                        print("      Waiting 1.5 s for results to appear in RAM...")
+                        time.sleep(1.5)
+                        distance, scores = game.get_results()
+                        total = sum(scores)
+                        print()
+                        print(f"  Distance : {distance:.1f} m")
+                        print(f"  Judges   : {'  '.join(f'{s:.1f}' for s in scores)}")
+                        print(f"  Total    : {total:.1f}")
+                        print()
                         break
 
                 prev_y_vel = current_y_vel
