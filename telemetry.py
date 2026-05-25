@@ -10,7 +10,9 @@ class DSJ2MemoryDirect:
         
         # Fixed static offsets discovered from your data verification
         self.WIND_STRING_ADDR   = self.base_addr + 0x27363
-        # 0x27310 is a hill geometry constant (~13.125°, possibly table angle) — not wind dir
+        # Wind direction: f32 at +0x29674; transform: (-57.46 * raw + 361.81) % 360
+        # Source: exhaustive RAM scan (7 snapshots, MAE 8.8°, CORE — changed in all snaps)
+        self.WIND_DIR_ADDR      = self.base_addr + 0x29674
         self.PLAYER_STRUCT_ADDR = self.base_addr + 0x29bd0
 
     def is_jump_active(self):
@@ -32,7 +34,7 @@ class DSJ2MemoryDirect:
         state = {
             "x_vel": 0.0, "y_vel": 0.0, "speed": 0.0,
             "y_pos": 0.0, "x_pos": 0.0, "tilt": 0.0,
-            "wind_speed": 0.0, "wind_dir": 0.0   # wind_dir: address TBD (run wind_dir_scanner.py)
+            "wind_speed": 0.0, "wind_dir": 0.0
         }
         
         try:
@@ -58,8 +60,10 @@ class DSJ2MemoryDirect:
                 if numbers:
                     state["wind_speed"] = float(numbers[0])
 
-                # Wind direction address not yet confirmed — run wind_dir_scanner.py
-                # to find it.  wind_dir stays 0.0 until then.
+                # 3. Wind direction — f32 raw value, linear regression transform.
+                f.seek(self.WIND_DIR_ADDR)
+                raw_dir = struct.unpack('<f', f.read(4))[0]
+                state["wind_dir"] = (-57.46 * raw_dir + 361.81) % 360
 
         except Exception:
             pass # Catch mid-frame screen transition resets gracefully
@@ -129,7 +133,7 @@ if __name__ == "__main__":
                 print(
                     f"  [{flight_status}] DIST: {state['x_pos']:8.2f} | "
                     f"Y-VEL: {current_y_vel:6.2f} | Y-POS: {current_y_pos:8.2f} | "
-                    f"TILT: {state['tilt']:5.2f} | WIND: {state['wind_speed']:.2f} m/s",
+                    f"TILT: {state['tilt']:5.2f} | WIND: {state['wind_speed']:.2f} m/s @ {state['wind_dir']:.0f}°",
                     end="\r"
                 )
 
